@@ -5409,4 +5409,610 @@ end
 
 AstraUI.Version = V31_VERSION
 
+
+-- ============================================================================
+-- AstraUI V3.2 responsive/design refinement layer
+-- Focus only: visual hierarchy, mobile ergonomics, responsive window behavior,
+-- glyph reliability and touch presentation. No new public component types.
+-- ============================================================================
+
+local V32_VERSION = "3.2.0-executor"
+
+-- Rose keeps the pink identity but moves most of the chrome back toward neutral
+-- charcoal. Accent should attract the eye; every container should not compete.
+AstraUI.Themes.Rose = merge(DEFAULT_THEME, {
+    Background = Color3.fromRGB(12, 10, 13),
+    Surface = Color3.fromRGB(18, 15, 19),
+    Surface2 = Color3.fromRGB(26, 21, 27),
+    Surface3 = Color3.fromRGB(35, 29, 37),
+    Accent = Color3.fromRGB(231, 87, 164),
+    Accent2 = Color3.fromRGB(255, 136, 199),
+    Border = Color3.fromRGB(53, 43, 56),
+})
+
+local function v32GetViewport()
+    local camera = workspace.CurrentCamera
+    return camera and camera.ViewportSize or Vector2.new(1280, 720)
+end
+
+local function v32GetOffsetSize(size, fallbackX, fallbackY)
+    if typeof(size) == "UDim2" and size.X.Scale == 0 and size.Y.Scale == 0 then
+        return math.max(1, size.X.Offset), math.max(1, size.Y.Offset)
+    end
+    return fallbackX, fallbackY
+end
+
+local function v32SetCorner(instance, radius)
+    if not instance then return end
+    local c = instance:FindFirstChildOfClass("UICorner")
+    if c then c.CornerRadius = UDim.new(0, radius) end
+end
+
+local function v32SetPagePadding(page, left, right, top, bottom)
+    if not page then return end
+    local p = page:FindFirstChildOfClass("UIPadding")
+    if p then
+        p.PaddingLeft = UDim.new(0, left)
+        p.PaddingRight = UDim.new(0, right)
+        p.PaddingTop = UDim.new(0, top)
+        p.PaddingBottom = UDim.new(0, bottom)
+    end
+end
+
+local function v32RegisterResponsive(window, callback)
+    window._v32ResponsiveCallbacks = window._v32ResponsiveCallbacks or {}
+    table.insert(window._v32ResponsiveCallbacks, callback)
+end
+
+local function v32RunResponsiveCallbacks(window)
+    for _, callback in ipairs(window._v32ResponsiveCallbacks or {}) do
+        safeCall(callback, window._v32Narrow == true, window._v32TouchLayout == true)
+    end
+end
+
+local function v32Chevron(window, parent, size)
+    local host = create("Frame", {
+        Name = "AstraV32Chevron",
+        Parent = parent,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5),
+        Size = UDim2.fromOffset(size or 14, size or 14),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = (parent.ZIndex or 1) + 2,
+    })
+    local color = window.Theme.Muted
+    local a = v31Line(host, UDim2.new(0.5, -5, 0.5, -1), UDim2.fromOffset(7, 1.4), color, 40, host.ZIndex + 1)
+    local b = v31Line(host, UDim2.new(0.5, 0, 0.5, -1), UDim2.fromOffset(7, 1.4), color, -40, host.ZIndex + 1)
+    window._bindTheme(a, "BackgroundColor3", "Muted")
+    window._bindTheme(b, "BackgroundColor3", "Muted")
+    return host
+end
+
+local function v32DecorateChevronGlyph(window, glyph)
+    if not glyph or glyph:GetAttribute("AstraV32ChevronGlyph") then return end
+    local text = tostring(glyph.Text or "")
+    if text ~= "⌄" and text ~= "⌃" then return end
+    glyph:SetAttribute("AstraV32ChevronGlyph", true)
+    glyph.TextTransparency = 1
+    local host = v32Chevron(window, glyph, 14)
+    local function sync()
+        local value = tostring(glyph.Text or "")
+        host.Visible = value == "⌄" or value == "⌃"
+        local rotation = value == "⌃" and 180 or 0
+        tween(host, 0.12, {Rotation = rotation})
+    end
+    window:_connect(glyph:GetPropertyChangedSignal("Text"), sync)
+    sync()
+end
+
+local function v32DecorateCheckGlyph(window, glyph)
+    if not glyph or glyph:GetAttribute("AstraV32CheckGlyph") then return end
+    if not glyph:IsA("TextLabel") then return end
+    if glyph.AnchorPoint.X < 0.9 then return end
+    if glyph.Size.X.Offset ~= 20 or glyph.Size.Y.Offset ~= 20 then return end
+
+    glyph:SetAttribute("AstraV32CheckGlyph", true)
+    glyph.TextTransparency = 1
+    local host = create("Frame", {
+        Name = "AstraV32Check",
+        Parent = glyph,
+        AnchorPoint = Vector2.new(0.5,0.5),
+        Position = UDim2.fromScale(0.5,0.5),
+        Size = UDim2.fromOffset(14,14),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = glyph.ZIndex + 2,
+    })
+    local a = v31Line(host, UDim2.fromOffset(1.5,7.5), UDim2.fromOffset(5.5,1.5), window.Theme.Accent2, 42, host.ZIndex + 1)
+    local b = v31Line(host, UDim2.fromOffset(5.2,6.4), UDim2.fromOffset(8,1.5), window.Theme.Accent2, -43, host.ZIndex + 1)
+    window._bindTheme(a,"BackgroundColor3","Accent2")
+    window._bindTheme(b,"BackgroundColor3","Accent2")
+    local function sync()
+        host.Visible = tostring(glyph.Text or "") ~= ""
+    end
+    window:_connect(glyph:GetPropertyChangedSignal("Text"), sync)
+    sync()
+end
+
+local function v32DecorateGlyphs(window, root)
+    if not root then return end
+    for _, item in ipairs(root:GetDescendants()) do
+        if item:IsA("TextLabel") or item:IsA("TextButton") then
+            v32DecorateChevronGlyph(window, item)
+        end
+        if item:IsA("TextLabel") then
+            v32DecorateCheckGlyph(window, item)
+        end
+    end
+end
+
+-- Reduce visual nesting another step. Borders become supporting detail instead
+-- of the dominant separator between every single control.
+local _AstraV32Row = Tab._row
+function Tab:_row(parent, height)
+    local row = _AstraV32Row(self, parent, height)
+    for _, child in ipairs(row:GetChildren()) do
+        if child:IsA("UIStroke") then child.Transparency = 0.76 end
+    end
+    v32SetCorner(row, 10)
+    return row
+end
+
+-- Keep the existing dropdown API/behavior, but replace unsupported unicode UI
+-- glyphs and make the right-hand value field adapt on narrow phones.
+local _AstraV32AddDropdown = Tab._addDropdown
+function Tab:_addDropdown(parent, data)
+    local existing = {}
+    for _, child in ipairs(parent:GetChildren()) do existing[child] = true end
+
+    local object = _AstraV32AddDropdown(self, parent, data)
+    local holder
+    for _, child in ipairs(parent:GetChildren()) do
+        if not existing[child] and child:IsA("Frame") then
+            holder = child
+            break
+        end
+    end
+
+    if holder then
+        holder.Name = "AstraDropdown"
+        object.Instance = holder
+        for _, child in ipairs(holder:GetChildren()) do
+            if child:IsA("UIStroke") then child.Transparency = 0.74 end
+        end
+        v32DecorateGlyphs(self.Window, holder)
+
+        self.Window:_connect(holder.DescendantAdded, function(descendant)
+            task.defer(function()
+                if self.Window.Destroyed or not descendant.Parent then return end
+                if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+                    v32DecorateChevronGlyph(self.Window, descendant)
+                end
+                if descendant:IsA("TextLabel") then
+                    v32DecorateCheckGlyph(self.Window, descendant)
+                end
+            end)
+        end)
+
+        local header
+        for _, child in ipairs(holder:GetChildren()) do
+            if child:IsA("TextButton") then header = child break end
+        end
+        if header then
+            local display
+            local titleLabels = {}
+            for _, child in ipairs(header:GetChildren()) do
+                if child:IsA("TextLabel") then
+                    if child.BackgroundTransparency < 1 and child.AnchorPoint.X > 0.9 then
+                        display = child
+                    elseif not child:GetAttribute("AstraV32ChevronGlyph") then
+                        table.insert(titleLabels, child)
+                    end
+                end
+            end
+            v32RegisterResponsive(self.Window, function(narrow)
+                if not header.Parent then return end
+                header.Size = UDim2.new(1,0,0,narrow and 56 or 58)
+                if display then
+                    display.Size = UDim2.fromOffset(narrow and 112 or 166, narrow and 30 or 32)
+                    display.Position = UDim2.new(1, narrow and -36 or -40, 0.5, 0)
+                end
+                if narrow then
+                    for _, label in ipairs(titleLabels) do
+                        label.Size = UDim2.new(1,-162,label.Size.Y.Scale,label.Size.Y.Offset)
+                    end
+                end
+            end)
+        end
+    end
+
+    return object
+end
+
+-- Section frame remains the same component, just quieter and more efficient on
+-- small screens.
+local _AstraV32CreateSection = Tab.CreateSection
+function Tab:CreateSection(options)
+    local section = _AstraV32CreateSection(self, options)
+    if section and section.Frame then
+        for _, child in ipairs(section.Frame:GetChildren()) do
+            if child:IsA("UIStroke") then child.Transparency = 0.66 end
+        end
+        v32SetCorner(section.Frame, 13)
+        v32DecorateGlyphs(self.Window, section.Frame)
+    end
+    v32RegisterResponsive(self.Window, function(narrow)
+        if not section or not section.Frame or not section.Frame.Parent then return end
+        for _, child in ipairs(section.Frame:GetChildren()) do
+            if child:IsA("UIPadding") then
+                local side = narrow and 9 or 11
+                child.PaddingLeft = UDim.new(0,side)
+                child.PaddingRight = UDim.new(0,side)
+                child.PaddingTop = UDim.new(0,narrow and 8 or 10)
+                child.PaddingBottom = UDim.new(0,narrow and 9 or 11)
+            end
+        end
+        if section.Layout then section.Layout.Padding = UDim.new(0,narrow and 5 or 6) end
+    end)
+    return section
+end
+
+local function v32SetTabIconColor(tab, color)
+    local host = tab and tab._v31IconFrame
+    if not host then return end
+    for _, item in ipairs(host:GetDescendants()) do
+        if item:IsA("UIStroke") then
+            tween(item, 0.14, {Color = color})
+        elseif item:IsA("ImageLabel") then
+            tween(item, 0.14, {ImageColor3 = color})
+        elseif item:IsA("TextLabel") then
+            tween(item, 0.14, {TextColor3 = color})
+        elseif item:IsA("Frame") and item.BackgroundTransparency < 1 then
+            tween(item, 0.14, {BackgroundColor3 = color})
+        end
+    end
+end
+
+local function v32ApplyTabVisuals(window)
+    for _, tab in ipairs(window.Tabs or {}) do
+        local selected = tab == window.CurrentTab
+        if tab.Button then
+            if selected then
+                tween(tab.Button, 0.14, {BackgroundTransparency = 0.08})
+            end
+        end
+        v32SetTabIconColor(tab, selected and window.Theme.Accent2 or window.Theme.Muted)
+    end
+end
+
+local _AstraV32CreateTab = Window.CreateTab
+function Window:CreateTab(options)
+    local tab = _AstraV32CreateTab(self, options)
+    if tab.Page then
+        tab.Page.ScrollBarThickness = UserInputService.TouchEnabled and 0 or 2
+        tab.Page.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+        tab.Page.ScrollingDirection = Enum.ScrollingDirection.Y
+        v32RegisterResponsive(self, function(narrow, touch)
+            if not tab.Page.Parent then return end
+            v32SetPagePadding(tab.Page, narrow and 10 or 18, narrow and 10 or 18, narrow and 2 or 4, narrow and 12 or 18)
+            tab.Page.ScrollBarThickness = touch and 0 or 2
+        end)
+    end
+    v32ApplyTabVisuals(self)
+    return tab
+end
+
+local _AstraV32SelectTab = Window.SelectTab
+function Window:SelectTab(tab)
+    _AstraV32SelectTab(self, tab)
+    v32ApplyTabVisuals(self)
+    if tab and tab.Page and tab.Page.Visible then
+        tab.Page.Position = UDim2.fromOffset(0, 4)
+        tween(tab.Page, 0.15, {Position = UDim2.fromOffset(0,0)})
+    end
+    if self._v32Narrow and self._v32DrawerOpen then
+        self:SetSidebarCollapsed(true)
+    end
+end
+
+local _AstraV32SetTheme = Window.SetTheme
+function Window:SetTheme(themePatch)
+    _AstraV32SetTheme(self, themePatch)
+    task.defer(function()
+        if not self.Destroyed then v32ApplyTabVisuals(self) end
+    end)
+end
+
+local _AstraV32SetSidebarCollapsed = Window.SetSidebarCollapsed
+local _AstraV32ToggleSidebar = Window.ToggleSidebar
+
+local function v32SetDrawer(window, open, instant)
+    if not window._v32Narrow then return end
+    open = open == true
+    window._v32DrawerOpen = open
+    window.SidebarCollapsed = not open
+
+    local width = window._v32DrawerWidth or 228
+    local target = open and UDim2.fromOffset(0,0) or UDim2.fromOffset(-width - 8,0)
+    if instant then
+        window.Sidebar.Position = target
+    else
+        tween(window.Sidebar, 0.18, {Position = target}, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    end
+
+    if window._v32Scrim then
+        if open then
+            window._v32Scrim.Visible = true
+            window._v32Scrim.BackgroundTransparency = 1
+            tween(window._v32Scrim, 0.16, {BackgroundTransparency = 0.46})
+        else
+            tween(window._v32Scrim, 0.14, {BackgroundTransparency = 1})
+            task.delay(0.14, function()
+                if window.Destroyed or not window._v32Scrim then return end
+                if not window._v32DrawerOpen then window._v32Scrim.Visible = false end
+            end)
+        end
+    end
+
+    local searchHolder = window.SearchBox and window.SearchBox.Parent
+    if searchHolder then searchHolder.Visible = true end
+    if window.BrandTitle then window.BrandTitle.Visible = true end
+    if window.BrandSubtitle then window.BrandSubtitle.Visible = true end
+    if window.FooterText then window.FooterText.Visible = true end
+    if window.TabList then
+        window.TabList.Position = UDim2.fromOffset(10,126)
+        window.TabList.Size = UDim2.new(1,-20,1,-180)
+    end
+    for _, tab in ipairs(window.Tabs or {}) do
+        if tab._v31ApplyLayout then tab:_v31ApplyLayout(false) end
+    end
+end
+
+function Window:SetSidebarCollapsed(state, instant)
+    if self._v32Narrow then
+        v32SetDrawer(self, not (state == true), instant)
+        return
+    end
+    _AstraV32SetSidebarCollapsed(self, state, instant)
+    v32ApplyTabVisuals(self)
+end
+
+function Window:ToggleSidebar()
+    if self._v32Narrow then
+        v32SetDrawer(self, not self._v32DrawerOpen, false)
+        return
+    end
+    _AstraV32ToggleSidebar(self)
+end
+
+local function v32ApplyWindowResponsive(window, options, instant)
+    if window.Destroyed then return end
+    local viewport = v32GetViewport()
+    local touch = UserInputService.TouchEnabled
+    local baseW, baseH = v32GetOffsetSize(window._v32BaseSize, 840, 550)
+    local narrow = viewport.X < 600 or (touch and viewport.X < 680 and viewport.Y >= viewport.X)
+    local touchLayout = touch == true
+    local wasNarrow = window._v32Narrow == true
+    local wasDrawerOpen = window._v32DrawerOpen == true
+
+    window._v32Narrow = narrow
+    window._v32TouchLayout = touchLayout
+
+    local shadow = window.Root and window.Root:FindFirstChild("Shadow")
+
+    if narrow then
+        local margin = 6
+        window.ResponsiveScale = 1
+        window.Scale.Scale = 1
+        window.Root.Position = UDim2.fromScale(0.5,0.5)
+        window.Root.Size = UDim2.new(1,-margin*2,1,-margin*2)
+        v32SetCorner(window.Root, 14)
+        if shadow then shadow.Visible = false end
+
+        local drawerWidth = math.clamp(math.floor(viewport.X * 0.74), 208, 252)
+        window._v32DrawerWidth = drawerWidth
+        window.Sidebar.Size = UDim2.new(0,drawerWidth,1,0)
+        window.Sidebar.ZIndex = 30
+        window.Main.Position = UDim2.fromOffset(0,0)
+        window.Main.Size = UDim2.fromScale(1,1)
+
+        window.Topbar.Size = UDim2.new(1,0,0,58)
+        window.Pages.Position = UDim2.fromOffset(0,58)
+        window.Pages.Size = UDim2.new(1,0,1,-58)
+
+        if window.SidebarButton then
+            window.SidebarButton.AnchorPoint = Vector2.new(0,0)
+            window.SidebarButton.Position = UDim2.fromOffset(12,12)
+            window.SidebarButton.Size = UDim2.fromOffset(32,32)
+        end
+        if window.PageTitle then
+            window.PageTitle.Position = UDim2.fromOffset(56,8)
+            window.PageTitle.Size = UDim2.new(1,-164,0,22)
+            window.PageTitle.TextSize = 17
+        end
+        if window.PageDesc then
+            window.PageDesc.Position = UDim2.fromOffset(56,31)
+            window.PageDesc.Size = UDim2.new(1,-164,0,17)
+            window.PageDesc.TextSize = 10
+        end
+        if window.ThemeButton and window.ThemeButton.Parent then
+            local actions = window.ThemeButton.Parent
+            actions.Size = UDim2.fromOffset(70,32)
+            actions.Position = UDim2.new(1,-10,0,12)
+            window.ThemeButton.Size = UDim2.fromOffset(32,32)
+            window.ThemeButton.Position = UDim2.fromOffset(0,0)
+            window.MinimizeButton.Size = UDim2.fromOffset(32,32)
+            window.MinimizeButton.Position = UDim2.fromOffset(38,0)
+        end
+        if window.CloseButton then window.CloseButton.Visible = false end
+
+        if window.NotificationHost then
+            window.NotificationHost.Position = UDim2.new(1,-10,0,10)
+            window.NotificationHost.Size = UDim2.fromOffset(math.clamp(viewport.X - 20, 250, 330),0)
+        end
+        if window.MobileOpen then
+            window.MobileOpen.Size = UDim2.fromOffset(50,50)
+            window.MobileOpen.AnchorPoint = Vector2.new(1,1)
+            if not window.MobileOpen:GetAttribute("AstraV32UserMovedLauncher") then
+                window.MobileOpen.Position = UDim2.new(1,-14,1,-14)
+            end
+        end
+
+        -- Drawer starts closed when entering phone layout, but an already open
+        -- drawer stays open through small viewport-height changes (keyboard etc.).
+        v32SetDrawer(window, wasNarrow and wasDrawerOpen or false, instant ~= false)
+    else
+        if window._v32Scrim then
+            window._v32Scrim.Visible = false
+            window._v32Scrim.BackgroundTransparency = 1
+        end
+        window._v32DrawerOpen = false
+        window.Sidebar.Position = UDim2.fromOffset(0,0)
+        window.Sidebar.ZIndex = 3
+        window.Root.Size = window._v32BaseSize
+        window.Root.Position = UDim2.fromScale(0.5,0.5)
+        v32SetCorner(window.Root, 18)
+        if shadow then shadow.Visible = true end
+
+        local fitScale = math.min((viewport.X - 18) / baseW, (viewport.Y - 18) / baseH, 1)
+        fitScale = math.clamp(fitScale, touch and 0.52 or 0.72, 1)
+        window.ResponsiveScale = fitScale
+        if not window.Minimized then window.Scale.Scale = fitScale end
+
+        window.Topbar.Size = UDim2.new(1,0,0,66)
+        window.Pages.Position = UDim2.fromOffset(0,66)
+        window.Pages.Size = UDim2.new(1,0,1,-66)
+
+        if window.SidebarButton then
+            window.SidebarButton.AnchorPoint = Vector2.new(1,0)
+            window.SidebarButton.Position = UDim2.new(1,-100,0,14)
+            window.SidebarButton.Size = UDim2.fromOffset(34,34)
+        end
+        if window.PageTitle then
+            window.PageTitle.Position = UDim2.fromOffset(20,12)
+            window.PageTitle.Size = UDim2.new(1,-170,0,24)
+            window.PageTitle.TextSize = 18
+        end
+        if window.PageDesc then
+            window.PageDesc.Position = UDim2.fromOffset(20,36)
+            window.PageDesc.Size = UDim2.new(1,-170,0,18)
+            window.PageDesc.TextSize = 11
+        end
+        if window.ThemeButton and window.ThemeButton.Parent then
+            local actions = window.ThemeButton.Parent
+            actions.Size = UDim2.fromOffset(76,34)
+            actions.Position = UDim2.new(1,-14,0,14)
+            window.ThemeButton.Size = UDim2.fromOffset(34,34)
+            window.ThemeButton.Position = UDim2.fromOffset(0,0)
+            window.MinimizeButton.Size = UDim2.fromOffset(34,34)
+            window.MinimizeButton.Position = UDim2.fromOffset(42,0)
+        end
+        if window.CloseButton then window.CloseButton.Visible = options.ShowCloseButton == true end
+        if window.NotificationHost then
+            window.NotificationHost.Position = UDim2.new(1,-16,0,16)
+            window.NotificationHost.Size = UDim2.fromOffset(330,0)
+        end
+        if window.MobileOpen then
+            window.MobileOpen.Size = UDim2.fromOffset(56,56)
+        end
+
+        if options.AutoCollapseSidebar ~= false then
+            local targetCollapsed = touch or viewport.X < 700
+            -- Narrow drawer mode also uses SidebarCollapsed as its open/closed
+            -- state. Force one transition when leaving that mode so the rail
+            -- geometry is actually restored even when the boolean matches.
+            if wasNarrow then window.SidebarCollapsed = not targetCollapsed end
+            window:SetSidebarCollapsed(targetCollapsed, true)
+        elseif wasNarrow then
+            window.SidebarCollapsed = true
+            window:SetSidebarCollapsed(false, true)
+        end
+    end
+
+    if window.TabList then
+        local layout = window.TabList:FindFirstChildOfClass("UIListLayout")
+        if layout then layout.Padding = UDim.new(0,narrow and 4 or 5) end
+    end
+
+    v32RunResponsiveCallbacks(window)
+    v32ApplyTabVisuals(window)
+end
+
+local _AstraV32CreateWindow = AstraUI.CreateWindow
+function AstraUI:CreateWindow(options)
+    options = options or {}
+    local window = _AstraV32CreateWindow(self, options)
+    window._v32BaseSize = options.Size or UDim2.fromOffset(840,550)
+    window._v32ResponsiveCallbacks = window._v32ResponsiveCallbacks or {}
+    window._v32Narrow = false
+    window._v32DrawerOpen = false
+
+    -- Dimmer belongs to the existing navigation structure; it only appears when
+    -- the sidebar becomes a mobile drawer.
+    local scrim = create("TextButton", {
+        Name = "MobileSidebarScrim",
+        Parent = window.Root,
+        Size = UDim2.fromScale(1,1),
+        BackgroundColor3 = Color3.new(0,0,0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        Visible = false,
+        ZIndex = 20,
+    })
+    window._v32Scrim = scrim
+    window:_connect(scrim.MouseButton1Click, function()
+        if window._v32Narrow then window:SetSidebarCollapsed(true) end
+    end)
+
+    -- Remove every remaining arrow/check unicode dependency in existing UI.
+    v32DecorateGlyphs(window, window.Root)
+
+    local cameraConnection
+    local function bindViewport()
+        if cameraConnection then
+            pcall(function() cameraConnection:Disconnect() end)
+            cameraConnection = nil
+        end
+        local camera = workspace.CurrentCamera
+        if camera then
+            cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+                task.defer(function()
+                    if not window.Destroyed then v32ApplyWindowResponsive(window, options, true) end
+                end)
+            end)
+            table.insert(window._connections, cameraConnection)
+        end
+        task.defer(function()
+            if not window.Destroyed then v32ApplyWindowResponsive(window, options, true) end
+        end)
+    end
+    bindViewport()
+    window:_connect(workspace:GetPropertyChangedSignal("CurrentCamera"), bindViewport)
+
+    -- Keep the launcher inside a reachable mobile-safe region after dragging.
+    if window.MobileOpen then
+        window:_connect(UserInputService.InputEnded, function(input)
+            if input.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+            task.defer(function()
+                if window.Destroyed or not window.MobileOpen or not window.MobileOpen.Parent then return end
+                local viewport = v32GetViewport()
+                local pos = window.MobileOpen.AbsolutePosition
+                local size = window.MobileOpen.AbsoluteSize
+                local x = math.clamp(pos.X, 8, math.max(8,viewport.X-size.X-8))
+                local y = math.clamp(pos.Y, 8, math.max(8,viewport.Y-size.Y-8))
+                window.MobileOpen:SetAttribute("AstraV32UserMovedLauncher", true)
+                window.MobileOpen.AnchorPoint = Vector2.new(1,1)
+                window.MobileOpen.Position = UDim2.fromOffset(x + size.X, y + size.Y)
+            end)
+        end)
+    end
+
+    return window
+end
+
+AstraUI.Version = V32_VERSION
+
 return AstraUI.new()
