@@ -6013,6 +6013,335 @@ function AstraUI:CreateWindow(options)
     return window
 end
 
-AstraUI.Version = V32_VERSION
+
+-- ============================================================================
+-- AstraUI V3.3 visual refinement layer
+-- No new component types: this pass only improves density, hierarchy and
+-- touch-landscape presentation based on real mobile screenshots.
+-- ============================================================================
+
+local V33_VERSION = "3.3.0-executor"
+
+local function v33IsTouchLandscape()
+    local viewport = v32GetViewport()
+    return UserInputService.TouchEnabled and viewport.X > viewport.Y and not (viewport.X < 600)
+end
+
+local function v33FindBrandParts(window)
+    if window._v33BrandFrame and window._v33BrandFrame.Parent then
+        return window._v33BrandFrame, window._v33BrandIcon
+    end
+    if not window.Sidebar then return nil,nil end
+    for _, child in ipairs(window.Sidebar:GetChildren()) do
+        if child:IsA("Frame") and child.BackgroundTransparency == 1 then
+            for _, nested in ipairs(child:GetChildren()) do
+                if nested:IsA("Frame") and nested.Size.X.Offset >= 34 and nested.Size.X.Offset <= 44 then
+                    local label = nested:FindFirstChildOfClass("TextLabel")
+                    if label then
+                        window._v33BrandFrame = child
+                        window._v33BrandIcon = nested
+                        return child,nested
+                    end
+                end
+            end
+        end
+    end
+    return nil,nil
+end
+
+local function v33DrawThemeIcon(window)
+    local target = window.ThemeButton
+    if not target then return end
+    v31ClearIcon(target)
+    target.Text = ""
+    target.TextTransparency = 1
+
+    local host = v31IconHost(target, UDim2.new(0.5,-9,0.5,-9), UDim2.fromOffset(18,18), target.ZIndex + 2)
+    host.Name = "AstraV31Icon"
+    local color = window.Theme.Muted
+
+    local center = create("Frame", {
+        Parent = host,
+        AnchorPoint = Vector2.new(0.5,0.5),
+        Position = UDim2.fromScale(0.5,0.5),
+        Size = UDim2.fromOffset(6,6),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+        ZIndex = host.ZIndex + 2,
+    }, {corner(999)})
+    window._bindTheme(center,"BackgroundColor3","Muted")
+
+    for _, data in ipairs({
+        {UDim2.fromOffset(8.4,0.5), UDim2.fromOffset(1.2,4), 0},
+        {UDim2.fromOffset(8.4,13.5), UDim2.fromOffset(1.2,4), 0},
+        {UDim2.fromOffset(0.5,8.4), UDim2.fromOffset(4,1.2), 0},
+        {UDim2.fromOffset(13.5,8.4), UDim2.fromOffset(4,1.2), 0},
+        {UDim2.fromOffset(2.8,2.8), UDim2.fromOffset(4,1.1), 45},
+        {UDim2.fromOffset(11.2,2.8), UDim2.fromOffset(4,1.1), -45},
+        {UDim2.fromOffset(2.8,11.2), UDim2.fromOffset(4,1.1), -45},
+        {UDim2.fromOffset(11.2,11.2), UDim2.fromOffset(4,1.1), 45},
+    }) do
+        local ray = v31Line(host, data[1], data[2], color, data[3], host.ZIndex + 1)
+        window._bindTheme(ray,"BackgroundColor3","Muted")
+    end
+end
+
+-- Rows keep their normal desktop size, but become denser in touch landscape.
+-- This preserves comfortable portrait touch targets while fitting considerably
+-- more information on the common mobile landscape viewport used by Roblox.
+local _AstraV33Row = Tab._row
+function Tab:_row(parent, height)
+    local baseHeight = height or 54
+    local row = _AstraV33Row(self,parent,height)
+    v32RegisterResponsive(self.Window,function(narrow,touch)
+        if not row.Parent then return end
+        local dense = touch and not narrow and v33IsTouchLandscape()
+        local target = baseHeight
+        if dense then
+            if baseHeight >= 72 then
+                target = baseHeight - 10
+            elseif baseHeight >= 60 then
+                target = baseHeight - 7
+            else
+                target = math.max(48,baseHeight - 4)
+            end
+        end
+        row.Size = UDim2.new(1,0,0,target)
+    end)
+    return row
+end
+
+-- Sections lose a little more padding only in landscape-touch mode. The goal is
+-- not to make them tiny; it is to remove the "card inside card" heaviness.
+local _AstraV33CreateSection = Tab.CreateSection
+function Tab:CreateSection(options)
+    local section = _AstraV33CreateSection(self,options)
+    v32RegisterResponsive(self.Window,function(narrow,touch)
+        if not section or not section.Frame or not section.Frame.Parent then return end
+        local dense = touch and not narrow and v33IsTouchLandscape()
+        if dense then
+            for _, child in ipairs(section.Frame:GetChildren()) do
+                if child:IsA("UIPadding") then
+                    child.PaddingLeft = UDim.new(0,9)
+                    child.PaddingRight = UDim.new(0,9)
+                    child.PaddingTop = UDim.new(0,8)
+                    child.PaddingBottom = UDim.new(0,9)
+                elseif child:IsA("UIStroke") then
+                    child.Transparency = 0.72
+                end
+            end
+            if section.Layout then section.Layout.Padding = UDim.new(0,5) end
+        end
+    end)
+    return section
+end
+
+-- Dropdown value boxes were still visually heavier than the other controls on
+-- mobile landscape. Keep the same behavior but tighten the field and row.
+local _AstraV33Dropdown = Tab._addDropdown
+function Tab:_addDropdown(parent,data)
+    local object = _AstraV33Dropdown(self,parent,data)
+    local holder = object and object.Instance
+    if holder then
+        v32RegisterResponsive(self.Window,function(narrow,touch)
+            if not holder.Parent then return end
+            local dense = touch and not narrow and v33IsTouchLandscape()
+            if dense then
+                local header
+                for _, child in ipairs(holder:GetChildren()) do
+                    if child:IsA("TextButton") then header=child break end
+                end
+                if header then
+                    header.Size = UDim2.new(1,0,0,54)
+                    for _, child in ipairs(header:GetChildren()) do
+                        if child:IsA("TextLabel") and child.BackgroundTransparency < 1 and child.AnchorPoint.X > 0.9 then
+                            child.Size = UDim2.fromOffset(150,30)
+                            child.Position = UDim2.new(1,-38,0.5,0)
+                        end
+                    end
+                end
+            end
+        end)
+    end
+    return object
+end
+
+local _AstraV33CreateTab = Window.CreateTab
+function Window:CreateTab(options)
+    local tab = _AstraV33CreateTab(self,options)
+    v32RegisterResponsive(self,function(narrow,touch)
+        if not tab.Page or not tab.Page.Parent then return end
+        local dense = touch and not narrow and v33IsTouchLandscape()
+        if dense then
+            v32SetPagePadding(tab.Page,14,14,2,14)
+        end
+    end)
+    return tab
+end
+
+local function v33ApplySidebarGeometry(window)
+    if window.Destroyed or window._v32Narrow then return end
+    local viewport = v32GetViewport()
+    local touchLandscape = UserInputService.TouchEnabled and viewport.X > viewport.Y
+    if not touchLandscape then
+        if window.Footer then window.Footer.Visible = true end
+        return
+    end
+
+    local collapsed = window.SidebarCollapsed == true
+    local sidebarWidth = collapsed and 62 or 194
+    window.Sidebar.Size = UDim2.new(0,sidebarWidth,1,0)
+    window.Main.Position = UDim2.fromOffset(sidebarWidth,0)
+    window.Main.Size = UDim2.new(1,-sidebarWidth,1,0)
+
+    local brand,brandIcon = v33FindBrandParts(window)
+    if brand then
+        brand.Position = collapsed and UDim2.fromOffset(12,12) or UDim2.fromOffset(14,14)
+    end
+    if brandIcon then
+        brandIcon.Size = collapsed and UDim2.fromOffset(36,36) or UDim2.fromOffset(38,38)
+    end
+
+    if window.Footer then
+        window.Footer.Visible = not collapsed
+        if not collapsed then
+            window.Footer.Position = UDim2.new(0,10,1,-10)
+            window.Footer.Size = UDim2.new(1,-20,0,38)
+            local dot
+            for _, child in ipairs(window.Footer:GetChildren()) do
+                if child:IsA("Frame") and child.Size.X.Offset <= 12 then dot=child break end
+            end
+            if dot then
+                dot.Size = UDim2.fromOffset(8,8)
+                dot.Position = UDim2.fromOffset(11,15)
+            end
+        end
+    end
+
+    if window.TabList then
+        if collapsed then
+            window.TabList.Position = UDim2.fromOffset(6,68)
+            window.TabList.Size = UDim2.new(1,-12,1,-82)
+        else
+            window.TabList.Position = UDim2.fromOffset(8,118)
+            window.TabList.Size = UDim2.new(1,-16,1,-168)
+        end
+    end
+
+    local searchHolder = window.SearchBox and window.SearchBox.Parent
+    if searchHolder and not collapsed then
+        searchHolder.Position = UDim2.fromOffset(10,72)
+        searchHolder.Size = UDim2.new(1,-20,0,36)
+        v32SetCorner(searchHolder,9)
+    end
+
+    for _, tab in ipairs(window.Tabs or {}) do
+        if tab.Button then
+            tab.Button.Size = UDim2.new(1,0,0,collapsed and 38 or 40)
+            v32SetCorner(tab.Button,9)
+        end
+        if tab._v31ApplyLayout then tab:_v31ApplyLayout(collapsed) end
+    end
+end
+
+local function v33ApplyWindowPolish(window,options)
+    if window.Destroyed then return end
+    local viewport = v32GetViewport()
+    local touch = UserInputService.TouchEnabled
+    local landscapeTouch = touch and viewport.X > viewport.Y and not window._v32Narrow
+
+    if landscapeTouch then
+        local baseW,baseH = v32GetOffsetSize(window._v32BaseSize,840,550)
+        local targetW = math.min(baseW,820)
+        local targetH = math.min(baseH,500)
+        window.Root.Size = UDim2.fromOffset(targetW,targetH)
+        window.Root.Position = UDim2.fromScale(0.5,0.5)
+        v32SetCorner(window.Root,16)
+
+        local fitScale = math.min((viewport.X-24)/targetW,(viewport.Y-24)/targetH,1)
+        fitScale = math.clamp(fitScale,0.72,1)
+        window.ResponsiveScale = fitScale
+        if not window.Minimized then window.Scale.Scale = fitScale end
+
+        window.Topbar.Size = UDim2.new(1,0,0,60)
+        window.Pages.Position = UDim2.fromOffset(0,60)
+        window.Pages.Size = UDim2.new(1,0,1,-60)
+
+        if window.PageTitle then
+            window.PageTitle.Position = UDim2.fromOffset(18,9)
+            window.PageTitle.Size = UDim2.new(1,-158,0,22)
+            window.PageTitle.TextSize = 17
+        end
+        if window.PageDesc then
+            window.PageDesc.Position = UDim2.fromOffset(18,31)
+            window.PageDesc.Size = UDim2.new(1,-158,0,16)
+            window.PageDesc.TextSize = 10
+        end
+        if window.SidebarButton then
+            window.SidebarButton.Size = UDim2.fromOffset(32,32)
+            window.SidebarButton.Position = UDim2.new(1,-94,0,12)
+        end
+        if window.ThemeButton and window.ThemeButton.Parent then
+            local actions = window.ThemeButton.Parent
+            actions.Size = UDim2.fromOffset(70,32)
+            actions.Position = UDim2.new(1,-12,0,12)
+            window.ThemeButton.Size = UDim2.fromOffset(32,32)
+            window.MinimizeButton.Size = UDim2.fromOffset(32,32)
+            window.MinimizeButton.Position = UDim2.fromOffset(38,0)
+        end
+        v33ApplySidebarGeometry(window)
+    end
+end
+
+local _AstraV33SetSidebarCollapsed = Window.SetSidebarCollapsed
+function Window:SetSidebarCollapsed(state,instant)
+    _AstraV33SetSidebarCollapsed(self,state,instant)
+    task.defer(function()
+        if not self.Destroyed then
+            v33ApplySidebarGeometry(self)
+            v33ApplyWindowPolish(self,self.Options or {})
+        end
+    end)
+end
+
+local _AstraV33CreateWindow = AstraUI.CreateWindow
+function AstraUI:CreateWindow(options)
+    options = options or {}
+    local window = _AstraV33CreateWindow(self,options)
+
+    -- The old half-filled ring was visually heavy in screenshots. A simple sun
+    -- is clearer at mobile scale and remains completely font-independent.
+    v33DrawThemeIcon(window)
+
+    local function applyLater()
+        task.defer(function()
+            if window.Destroyed then return end
+            v33ApplyWindowPolish(window,options)
+            v33ApplySidebarGeometry(window)
+            v32RunResponsiveCallbacks(window)
+            v32ApplyTabVisuals(window)
+        end)
+    end
+
+    local cameraConnection
+    local function bindV33Camera()
+        if cameraConnection then
+            pcall(function() cameraConnection:Disconnect() end)
+            cameraConnection=nil
+        end
+        local camera=workspace.CurrentCamera
+        if camera then
+            cameraConnection=camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLater)
+            table.insert(window._connections,cameraConnection)
+        end
+        applyLater()
+    end
+    bindV33Camera()
+    window:_connect(workspace:GetPropertyChangedSignal("CurrentCamera"),bindV33Camera)
+
+    return window
+end
+
+AstraUI.Version = V33_VERSION
 
 return AstraUI.new()
