@@ -2142,12 +2142,8 @@ __loaders["src/Components/Window.lua"] = function(script, require)
         end
     
         local function ClampPosition(X, Y, Width, Height)
-            local Viewport = Camera.ViewportSize
-            local Margin = Window.Maximized and 0 or (IsTouch and 4 or 8)
-            local MaxX = math.max(Margin, Viewport.X - Width - Margin)
-            local MaxY = math.max(Margin, Viewport.Y - Height - Margin)
-            return math.clamp(X, Margin, MaxX), math.clamp(Y, Margin, MaxY)
-        end
+    return X, Y
+                    end
     
         SizeMotor:onStep(function(Values)
             Window.Root.Size = UDim2.fromOffset(Values.X, Values.Y)
